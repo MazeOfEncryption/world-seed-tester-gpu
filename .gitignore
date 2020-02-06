@@ -1,1 +1,5 @@
 *.txt
+*.exe
+*.exp
+*.lib
+*.stackdump
