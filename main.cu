@@ -15,8 +15,8 @@ inline void gpuAssert(cudaError_t code, const char* file, int line) {
     }
 }
 __global__ void process(long* seeds) {
-	long global_id = blockIdx.x * blockDim.x + threadIdx.x;
-	// if(global_id % 1000000000 == 0) printf("Id: %lld, Value: %lld.\n", global_id, seeds[global_id]);
+	long index = blockIdx.x * blockDim.x + threadIdx.x;
+	
 }
 int main(void) {
 	// Allocate RAM for input
@@ -38,6 +38,8 @@ int main(void) {
 	std::string line;
 	while(std::getline(ifs, line)) {
 		// Load Input Block
+		// TODO: Fix issue where the last iteration will recheck seeds from the previous
+		// iteration if the number of inputs is not evenly divisible by WORK_UNIT_SIZE
 		for (long i = 0; ifs >> line && i < WORK_UNIT_SIZE; i++) {
 			long val = std::atoll(line.c_str());
 			input[i] = val;
