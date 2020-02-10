@@ -4,20 +4,9 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#define SIZE 1239101157
-void read(std::string filename, char *out) {
-	// Create input filestream
-	std::ifstream ifs (filename);
-	// Check for errors
-	if (ifs.fail()) {
-		std::cout << "ERROR::IFSTREAM::FAIL" << std::endl;
-		return;
-	}
-	// Read SIZE bytes of file into out
-	ifs.read(out, SIZE);
-	// Close stream
-	ifs.close();
-}
+#include <stdint.h>
+#define long int64_t
+#define SIZE 2 << 29 / sizeof(int64_t)
 #define CHECK_GPU_ERR(code) gpuAssert((code), __FILE__, __LINE__)
 inline void gpuAssert(cudaError_t code, const char* file, int line) {
     if (code != cudaSuccess) {
@@ -25,31 +14,31 @@ inline void gpuAssert(cudaError_t code, const char* file, int line) {
         exit(code);
     }
 }
-__global__ void process(char* seeds) {
+__global__ void process(long* seeds) {
 	long global_id = blockIdx.x * blockDim.x + threadIdx.x;
 	if (global_id >= SIZE - 8) {
 		return;
 	}
-	// Proof of concept: parse file looking for "10101010"
-	if (
-		seeds[global_id + 0] == '1' &&
-		seeds[global_id + 1] == '0' &&
-		seeds[global_id + 2] == '1' &&
-		seeds[global_id + 3] == '0' &&
-		seeds[global_id + 4] == '1' &&
-		seeds[global_id + 5] == '0' &&
-		seeds[global_id + 6] == '1' &&
-		seeds[global_id + 7] == '0'
-	) printf("Found @%ld.\n", global_id);
+	printf("%lld\n", global_id);
 }
 int main(void) {
 	// Allocate RAM for input
-	char* input = (char *)malloc(SIZE);
+	long *input = (long *)malloc(sizeof(long) * SIZE);
 	// Copy file to RAM
-	read("input.txt", input);
+	std::ifstream ifs ("input.txt");
+	if (ifs.fail()) {
+		std::cout << "ERROR::IFSTREAM::FAIL" << std::endl;
+		return -1;
+	}
+	std::string line;
+	long i = 0;
+	while (ifs >> line && i++ < SIZE) {
+		input[i] = std::atol(line.c_str());
+	}
+	ifs.close();
 	// Allocate VRAM for input
-	char* seeds;
-	CHECK_GPU_ERR(cudaMallocManaged((char **)&seeds, SIZE));
+	long *seeds;
+	CHECK_GPU_ERR(cudaMallocManaged((long **)&seeds, sizeof(long) * SIZE));
 	// Copy input to VRAM
 	CHECK_GPU_ERR(cudaMemcpy(seeds, input, SIZE, cudaMemcpyHostToDevice));
 	process<<<SIZE / 256, 256>>>(seeds);
