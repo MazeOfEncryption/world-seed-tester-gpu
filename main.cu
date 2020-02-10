@@ -6,7 +6,7 @@
 #include <sstream>
 #include <stdint.h>
 #define long int64_t
-#define SIZE 2 << 29 / sizeof(int64_t)
+#define WORK_UNIT_SIZE (2 << 20)
 #define CHECK_GPU_ERR(code) gpuAssert((code), __FILE__, __LINE__)
 inline void gpuAssert(cudaError_t code, const char* file, int line) {
     if (code != cudaSuccess) {
@@ -16,32 +16,44 @@ inline void gpuAssert(cudaError_t code, const char* file, int line) {
 }
 __global__ void process(long* seeds) {
 	long global_id = blockIdx.x * blockDim.x + threadIdx.x;
-	if (global_id >= SIZE - 8) {
-		return;
-	}
-	printf("%lld\n", global_id);
+	// if(global_id % 1000000000 == 0) printf("Id: %lld, Value: %lld.\n", global_id, seeds[global_id]);
 }
 int main(void) {
 	// Allocate RAM for input
-	long *input = (long *)malloc(sizeof(long) * SIZE);
-	// Copy file to RAM
+	long *input = (long *)malloc(sizeof(long) * WORK_UNIT_SIZE);
+	// Oprn File
 	std::ifstream ifs ("input.txt");
 	if (ifs.fail()) {
 		std::cout << "ERROR::IFSTREAM::FAIL" << std::endl;
 		return -1;
 	}
-	std::string line;
-	long i = 0;
-	while (ifs >> line && i++ < SIZE) {
-		input[i] = std::atol(line.c_str());
-	}
-	ifs.close();
 	// Allocate VRAM for input
 	long *seeds;
-	CHECK_GPU_ERR(cudaMallocManaged((long **)&seeds, sizeof(long) * SIZE));
-	// Copy input to VRAM
-	CHECK_GPU_ERR(cudaMemcpy(seeds, input, SIZE, cudaMemcpyHostToDevice));
-	process<<<SIZE / 256, 256>>>(seeds);
+	CHECK_GPU_ERR(cudaMallocManaged((long **)&seeds, sizeof(long) * WORK_UNIT_SIZE));
+	// Open Inupt Block in RAM, copy to VRAM, and process.
+
+    clock_t lastIteration = clock();
+    clock_t startTime = clock();
+
+	std::string line;
+	while(std::getline(ifs, line)) {
+		// Load Input Block
+		for (long i = 0; ifs >> line && i < WORK_UNIT_SIZE; i++) {
+			long val = std::atoll(line.c_str());
+			input[i] = val;
+		}
+		// Copy input to VRAM
+		CHECK_GPU_ERR(cudaMemcpy(seeds, input, sizeof(long) * WORK_UNIT_SIZE, cudaMemcpyHostToDevice));
+		// Process input
+		process<<<WORK_UNIT_SIZE / 256, 256>>>(seeds);
+
+		double iterationTime = (double)(clock() - lastIteration) / CLOCKS_PER_SEC;
+        double timeElapsed = (double)(clock() - startTime) / CLOCKS_PER_SEC;
+		lastIteration = clock();
+		double speed = (double)WORK_UNIT_SIZE / (double)iterationTime / 1000000.0;
+		printf("Uptime: %.1fs. Speed: %.2fm/s.\n", timeElapsed, speed);
+	}
 	cudaFree(seeds);
+	ifs.close();
 	return 0;
 }
