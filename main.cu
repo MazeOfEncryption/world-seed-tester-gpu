@@ -15,9 +15,15 @@
 #define TREE_Z 10
 #define TREE_HEIGHT 5
 
-//this.rand.setSeed(integer3 * (this.rand.nextLong() / 2L * 2L + 1L) + integer4 * (this.rand.nextLong() / 2L * 2L + 1L) ^ this.worldObj.randomSeed);
 #define RANDOM_MASK (1ULL << 48) - 1
 #define setSeed(rand, val) ((rand) = ((val) ^ 0x5DEECE66DLL) & ((1LL << 48) - 1))
+#define advance(rand, multiplier, addend) ((rand) = ((rand) * (multiplier) + (addend)) & (RANDOM_MASK))
+#define advance_1(rand) advance(rand, 0x5DEECE66DLL, 0xBLL)
+#define advance_16(rand) advance(rand, 0x6DC260740241LL, 0xD0352014D90LL)
+#define advance_3760(rand) advance(rand, 0x8C35C76B80C1, 0xD7F102F24F30)
+
+// TODO: Find a way to make these header functions(?)
+// Note: probably not possible with MSVC, only GCC
 __host__ __device__ unsigned int next(long *rand, int bits) {
 	*rand = (*rand * 0x5DEECE66DLL + 0xBLL) & ((1LL << 48) - 1);
 	return (unsigned int)(*rand >> (48 - bits));
@@ -28,10 +34,6 @@ __host__ __device__ long nextLong(long *rand) {
 __host__ __device__ unsigned int nextIntBound(long *rand, int bound) {
 	return (unsigned int)((bound * (long)next(rand, 31)) >> 31);
 }
-#define advance(rand, multiplier, addend) ((rand) = ((rand) * (multiplier) + (addend)) & (RANDOM_MASK))
-#define advance_1(rand) advance(rand, 0x5DEECE66DLL, 0xBLL)
-#define advance_16(rand) advance(rand, 0x6DC260740241LL, 0xD0352014D90LL)
-#define advance_3760(rand) advance(rand, 0x8C35C76B80C1, 0xD7F102F24F30)
 
 inline void gpuAssert(cudaError_t code, const char* file, int line) {
     if (code != cudaSuccess) {
