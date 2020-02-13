@@ -9,30 +9,26 @@
 #define WORK_UNIT_SIZE (2 << 20)
 #define CHECK_GPU_ERR(code) gpuAssert((code), __FILE__, __LINE__)
 
-#define CHUNK_X 0
-#define CHUNK_Y 0
-#define TREE_X 2
-#define TREE_Z 10
-#define TREE_HEIGHT 5
+#define CHUNK_X 3
+#define CHUNK_Y 4
+#define TREE_ATTEMPTS 12
 
 #define RANDOM_MASK (1ULL << 48) - 1
 #define setSeed(rand, val) ((rand) = ((val) ^ 0x5DEECE66DLL) & ((1LL << 48) - 1))
 #define advance(rand, multiplier, addend) ((rand) = ((rand) * (multiplier) + (addend)) & (RANDOM_MASK))
 #define advance_1(rand) advance(rand, 0x5DEECE66DLL, 0xBLL)
 #define advance_16(rand) advance(rand, 0x6DC260740241LL, 0xD0352014D90LL)
-#define advance_3760(rand) advance(rand, 0x8C35C76B80C1, 0xD7F102F24F30)
+#define advance_3760(rand) advance(rand, 0x8C35C76B80C1LL, 0xD7F102F24F30LL)
 
-// TODO: Find a way to make these header functions(?)
-// Note: probably not possible with MSVC, only GCC
-__host__ __device__ unsigned int next(long *rand, int bits) {
+__host__ __device__ int next(long *rand, int bits) {
 	*rand = (*rand * 0x5DEECE66DLL + 0xBLL) & ((1LL << 48) - 1);
-	return (unsigned int)(*rand >> (48 - bits));
+	return (int)(*rand >> (48 - bits));
 }
 __host__ __device__ long nextLong(long *rand) {
 	return ((long)next(rand, 32) << 32) + next(rand, 32);
 }
-__host__ __device__ unsigned int nextIntBound(long *rand, int bound) {
-	return (unsigned int)((bound * (long)next(rand, 31)) >> 31);
+__host__ __device__ int nextIntBound(long *rand, int bound) {
+	return (int)((bound * (long)next(rand, 31)) >> 31);
 }
 
 inline void gpuAssert(cudaError_t code, const char* file, int line) {
@@ -41,17 +37,38 @@ inline void gpuAssert(cudaError_t code, const char* file, int line) {
         exit(code);
     }
 }
+
+// TODO: Check multiple chunks
 __global__ void process(long* seeds) {
+	int trees[][3] = {
+		{ 4,  0, 6},
+		{13, 14, 4},
+		{13,  3, 5},
+		{12, 11, 6},
+		{10,  2, 4},
+	};
 	long index = blockIdx.x * blockDim.x + threadIdx.x;
 	long seed = seeds[index];
 	long rand;
 	setSeed(rand, seed);
-	setSeed(rand, CHUNK_X * (nextLong(&rand) / 2LL * 2LL + 1LL) + CHUNK_Y * (nextLong(&rand) / 2LL * 2LL + 1LL) ^ seed);
+	long chunkSeed = CHUNK_X * (nextLong(&rand) / 2LL * 2LL + 1LL) + CHUNK_Y * (nextLong(&rand) / 2LL * 2LL + 1LL) ^ seed;
+	setSeed(rand, chunkSeed);
 	advance_3760(rand);
-	long treeX = nextIntBound(&rand, 16);
-	long treeZ = nextIntBound(&rand, 16);
-	long treeH = nextIntBound(&rand, 3) + 4;
-	if (treeX = TREE_X && treeZ == TREE_Z && treeH == TREE_HEIGHT) printf("%lld\n", seed);
+	int found = 0;
+	for (int attempt = 0; attempt < TREE_ATTEMPTS; attempt++) {
+		int treeX = nextIntBound(&rand, 16);
+		int treeZ = nextIntBound(&rand, 16);
+		int height = nextIntBound(&rand, 3) + 4;
+		for (int tree = 0; tree < sizeof(trees) / sizeof(trees[0]); tree++) {
+			if (treeX == trees[tree][0] && treeZ == trees[tree][1] && height == trees[tree][2]) {
+				advance_16(rand);
+				found++;
+			};
+		}
+	}
+	if (found == sizeof(trees) / sizeof(trees[0])) {
+		printf("Seed: %lld.\n", seed);
+	}
 }
 int main(void) {
 	// Allocate RAM for input
