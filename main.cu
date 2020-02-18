@@ -6,6 +6,8 @@
 #include <sstream>
 #include <stdint.h>
 #define long int64_t
+// TODO: Fix speed calculation when these are different numbers.
+#define INPUT_BLOCK_SIZE (2 << 20)
 #define WORK_UNIT_SIZE (2 << 20)
 #define CHECK_GPU_ERR(code) gpuAssert((code), __FILE__, __LINE__)
 
@@ -39,7 +41,7 @@ inline void gpuAssert(cudaError_t code, const char* file, int line) {
 }
 
 // TODO: Check multiple chunks
-__global__ void process(long* seeds) {
+__global__ void process(long* seeds, long offset) {
 	int trees[][3] = {
 		{ 4,  0, 6},
 		{13, 14, 4},
@@ -47,7 +49,7 @@ __global__ void process(long* seeds) {
 		{12, 11, 6},
 		{10,  2, 4},
 	};
-	long index = blockIdx.x * blockDim.x + threadIdx.x;
+	long index = offset + blockIdx.x * blockDim.x + threadIdx.x;
 	long seed = seeds[index];
 	long rand;
 	setSeed(rand, seed);
@@ -72,8 +74,8 @@ __global__ void process(long* seeds) {
 }
 int main(void) {
 	// Allocate RAM for input
-	long *input = (long *)malloc(sizeof(long) * WORK_UNIT_SIZE);
-	// Oprn File
+	long *input = (long *)malloc(sizeof(long) * INPUT_BLOCK_SIZE);
+	// Open File
 	std::ifstream ifs ("input.txt");
 	if (ifs.fail()) {
 		std::cout << "ERROR::IFSTREAM::FAIL" << std::endl;
@@ -81,32 +83,64 @@ int main(void) {
 	}
 	// Allocate VRAM for input
 	long *seeds;
-	CHECK_GPU_ERR(cudaMallocManaged((long **)&seeds, sizeof(long) * WORK_UNIT_SIZE));
-	// Open Inupt Block in RAM, copy to VRAM, and process.
-
-    clock_t lastIteration = clock();
-    clock_t startTime = clock();
-
+	CHECK_GPU_ERR(cudaMallocManaged((long **)&seeds, sizeof(long) * INPUT_BLOCK_SIZE));
+	// Load Input Block
+	// TODO: Fix issue where the last iteration will recheck seeds from the previous
+	// iteration if the number of inputs is not evenly divisible by WORK_UNIT_SIZE
+	// Currenmtly "fixed" by setting all remaining seeds to 0.
+	// clock_t startTime = clock();
+	// clock_t lastIteration = clock();
+	cudaEvent_t readStart, readStop, processStart, processStop, memcpyStart, memcpyStop;
+	cudaEventCreate(&readStart);
+	cudaEventCreate(&readStop);
+	cudaEventCreate(&processStart);
+	cudaEventCreate(&processStop);
+	cudaEventCreate(&memcpyStart);
+	cudaEventCreate(&memcpyStop);
 	std::string line;
-	while(std::getline(ifs, line)) {
-		// Load Input Block
-		// TODO: Fix issue where the last iteration will recheck seeds from the previous
-		// iteration if the number of inputs is not evenly divisible by WORK_UNIT_SIZE
-		for (long i = 0; ifs >> line && i < WORK_UNIT_SIZE; i++) {
-			long val = std::atoll(line.c_str());
-			input[i] = val;
+	int numIterations = 0;
+	float time;
+	while(std::getline(ifs, line) && numIterations++ < 5) {
+		cudaEventRecord(readStart, 0);
+		for (long i = 0; i < INPUT_BLOCK_SIZE; i++) {
+			if (ifs >> line) {
+				long val = std::atoll(line.c_str());
+				input[i] = val;
+			} else {
+				input[i] = 0;
+			}
 		}
-		// Copy input to VRAM
-		CHECK_GPU_ERR(cudaMemcpy(seeds, input, sizeof(long) * WORK_UNIT_SIZE, cudaMemcpyHostToDevice));
-		// Process input
-		process<<<WORK_UNIT_SIZE / 256, 256>>>(seeds);
+		cudaEventRecord(readStop, 0);
+		cudaEventSynchronize(readStop);
+		cudaEventElapsedTime(&time, readStart, readStop);
+		printf("Read: %f\n", time);
+		// Copy to VRAM
+		cudaEventRecord(memcpyStart, 0);
+		CHECK_GPU_ERR(cudaMemcpy(seeds, input, sizeof(long) * INPUT_BLOCK_SIZE, cudaMemcpyHostToDevice));
+		cudaEventRecord(memcpyStop, 0);
+		cudaEventSynchronize(memcpyStop);
+		cudaEventElapsedTime(&time, memcpyStart, memcpyStop);
+		printf("Memcpy: %f\n", time);
+		for(int offset = 0; offset < INPUT_BLOCK_SIZE; offset += WORK_UNIT_SIZE) {
+			cudaEventRecord(processStart, 0);
+			// Process input
+			process<<<WORK_UNIT_SIZE / 256, 256>>>(seeds, offset);
+			cudaEventRecord(processStop, 0);
+			cudaEventSynchronize(processStop);
+			cudaEventElapsedTime(&time, processStart, processStop);
+			printf("Process: %f\n", time);
 
-		double iterationTime = (double)(clock() - lastIteration) / CLOCKS_PER_SEC;
-        double timeElapsed = (double)(clock() - startTime) / CLOCKS_PER_SEC;
-		lastIteration = clock();
-		double speed = (double)WORK_UNIT_SIZE / (double)iterationTime / 1000000.0;
-		printf("Uptime: %.1fs. Speed: %.2fm/s.\n", timeElapsed, speed);
+			// double iterationTime = (double)(clock() - lastIteration) / CLOCKS_PER_SEC;
+			// double timeElapsed = (double)(clock() - startTime) / CLOCKS_PER_SEC;
+			// lastIteration = clock();
+			// double speed = (double)WORK_UNIT_SIZE / (double)iterationTime / 1000000.0;
+			// printf("Uptime: %.1fs. Speed: %.2fm/s.\n", timeElapsed, speed);
+		}
 	}
+	cudaEventDestroy(readStart);
+	cudaEventDestroy(readStop);
+	cudaEventDestroy(processStart);
+	cudaEventDestroy(processStop);
 	cudaFree(seeds);
 	ifs.close();
 	return 0;
