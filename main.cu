@@ -21,17 +21,6 @@
 #define advance_16(rand) advance(rand, 0x6DC260740241LL, 0xD0352014D90LL)
 #define advance_3760(rand) advance(rand, 0x8C35C76B80C1LL, 0xD7F102F24F30LL)
 
-struct range {
-	int l, h;
-};
-struct tree {
-	range x, y, h;
-};
-struct chunk {
-	long x, y;
-	std::vector<tree> trees;
-};
-
 __host__ __device__ int next(long *rand, int bits) {
 	*rand = (*rand * 0x5DEECE66DLL + 0xBLL) & ((1LL << 48) - 1);
 	return (int)(*rand >> (48 - bits));
@@ -50,49 +39,57 @@ inline void gpuAssert(cudaError_t code, const char* file, int line) {
     }
 }
 
-// TODO: Check multiple chunks
+struct Chunk {
+	int x, y;
+	__host__ __device__ bool operator==(const Chunk &rhs) {
+		return this->x == rhs.x && this->y == rhs.y;
+	}
+};
+
+struct Tree {
+	int x, y, h;
+	__host__ __device__ bool operator==(const Tree &rhs) {
+		return this->x == rhs.x && this->y == rhs.y && this->h == rhs.h;
+	}
+};
+
+__constant__ Chunk chunks[] = {{3, 4}};
+
+__device__ bool checkTree(Chunk chunk, Tree tree) {
+	if (chunk == Chunk{3, 4}) {
+		if (tree == Tree{ 4,  0, 6}) return true;
+		else if (tree == Tree{13, 14, 4}) return true;
+		else if (tree == Tree{13,  3, 5}) return true;
+		else if (tree == Tree{12, 11, 6}) return true;
+		else if (tree == Tree{10,  2, 4}) return true;
+	}
+	return false;
+}
+
+// TODO: Allow trees to have a range of possible coordinates.
 __global__ void process(long* seeds, long offset) {
-	std::vector<chunk> chunks = {
-		{3, 4, {
-			{{ 4,  4}, { 0,  0}, { 6,  6}},
-			{{13, 13}, {14, 14}, { 4,  4}},
-			{{13, 13}, { 3,  3}, { 5,  5}},
-			{{12, 12}, {11, 11}, { 6,  6}},
-			{{10, 10}, { 2,  2}, { 4,  4}},
-		}}
-	};
 	long index = offset + blockIdx.x * blockDim.x + threadIdx.x;
 	long seed = seeds[index];
 	long rand;
-	for(int c = 0; c < chunks.size(); c++) {
+	for(int c = 0; c < sizeof(chunks) / sizeof(Chunk); c++) {
 		setSeed(rand, seed);
 		long chunkSeed = chunks[c].x * (nextLong(&rand) / 2LL * 2LL + 1LL) + chunks[c].y * (nextLong(&rand) / 2LL * 2LL + 1LL) ^ seed;
 		setSeed(rand, chunkSeed);
 		advance_3760(rand);
 		int found = 0;
 		for (int attempt = 0; attempt < TREE_ATTEMPTS; attempt++) {
-			int treeX = nextIntBound(&rand, 16);
-			int treeZ = nextIntBound(&rand, 16);
-			int treeH = nextIntBound(&rand, 3) + 4;
-			for (int tree = 0; tree < chunks[c].trees.size(); tree++) {
-				bool valid = true;
-				valid &= treeX >= chunks[c].trees[tree].x.l;
-				valid &= treeX <= chunks[c].trees[tree].x.h;
-				valid &= treeZ >= chunks[c].trees[tree].y.l;
-				valid &= treeZ <= chunks[c].trees[tree].y.h;
-				valid &= treeH >= chunks[c].trees[tree].h.l;
-				valid &= treeH <= chunks[c].trees[tree].h.h;
-				if (valid) {
-					advance_16(rand);
-					found++;
-				};
-			}
+			Tree tree = {nextIntBound(&rand, 16), nextIntBound(&rand, 16), nextIntBound(&rand, 3) + 4};
+			if (checkTree(chunks[c], tree)) {
+				advance_16(rand);
+				found++;
+			};
 		}
-		if (found == chunks[c].trees.size()) {
+		if (found == 5) {
 			printf("Seed: %lld.\n", seed);
 		}
 	}
 }
+//TODO: Fix timing. Using a cudaEvent_t multiple times in a loop doesn't work properly(?). Also figure out proper synchronization calls.
 int main(void) {
 	// Allocate RAM for input
 	long *input = (long *)malloc(sizeof(long) * INPUT_BLOCK_SIZE);
@@ -111,17 +108,17 @@ int main(void) {
 	// Currenmtly "fixed" by setting all remaining seeds to 0.
 	// clock_t startTime = clock();
 	// clock_t lastIteration = clock();
-	// cudaEvent_t readStart, readStop, processStart, processStop, memcpyStart, memcpyStop;
-	// cudaEventCreate(&readStart);
-	// cudaEventCreate(&readStop);
-	// cudaEventCreate(&processStart);
-	// cudaEventCreate(&processStop);
-	// cudaEventCreate(&memcpyStart);
-	// cudaEventCreate(&memcpyStop);
+	cudaEvent_t readStart, readStop, processStart, processStop, memcpyStart, memcpyStop;
+	cudaEventCreate(&readStart);
+	cudaEventCreate(&readStop);
+	cudaEventCreate(&processStart);
+	cudaEventCreate(&processStop);
+	cudaEventCreate(&memcpyStart);
+	cudaEventCreate(&memcpyStop);
 	std::string line;
-	// float time;
+	float time;
 	while(std::getline(ifs, line)) {
-		// cudaEventRecord(readStart, 0);
+		cudaEventRecord(readStart, 0);
 		for (long i = 0; i < INPUT_BLOCK_SIZE; i++) {
 			if (ifs >> line) {
 				long val = std::atoll(line.c_str());
@@ -130,26 +127,26 @@ int main(void) {
 				input[i] = 0;
 			}
 		}
-		// cudaEventRecord(readStop, 0);
-		// cudaEventSynchronize(readStop);
-		// cudaEventElapsedTime(&time, readStart, readStop);
-		// printf("Read: %f\n", time);
+		cudaEventRecord(readStop, 0);
+		cudaEventSynchronize(readStop);
+		cudaEventElapsedTime(&time, readStart, readStop);
+		printf("Read: %f\n", time);
 		// Copy to VRAM
-		// cudaEventRecord(memcpyStart, 0);
+		cudaEventRecord(memcpyStart, 0);
 		CHECK_GPU_ERR(cudaMemcpy(seeds, input, sizeof(long) * INPUT_BLOCK_SIZE, cudaMemcpyHostToDevice));
-		// cudaEventRecord(memcpyStop, 0);
-		// cudaEventSynchronize(memcpyStop);
-		// cudaEventElapsedTime(&time, memcpyStart, memcpyStop);
-		// printf("Memcpy: %f\n", time);
+		cudaEventRecord(memcpyStop, 0);
+		cudaEventSynchronize(memcpyStop);
+		cudaEventElapsedTime(&time, memcpyStart, memcpyStop);
+		printf("Memcpy: %f\n", time);
 		for(int offset = 0; offset < INPUT_BLOCK_SIZE; offset += WORK_UNIT_SIZE) {
-			// cudaEventRecord(processStart, 0);
+			cudaEventRecord(processStart, 0);
 			// Process input
 			process<<<WORK_UNIT_SIZE / 256, 256>>>(seeds, offset);
-			// cudaDeviceSynchronize();
-			// cudaEventRecord(processStop, 0);
-			// cudaEventSynchronize(processStop);
-			// cudaEventElapsedTime(&time, processStart, processStop);
-			// printf("Process: %f\n", time);
+			cudaDeviceSynchronize();
+			cudaEventRecord(processStop, 0);
+			cudaEventSynchronize(processStop);
+			cudaEventElapsedTime(&time, processStart, processStop);
+			printf("Process: %f\n", time);
 
 			// double iterationTime = (double)(clock() - lastIteration) / CLOCKS_PER_SEC;
 			// double timeElapsed = (double)(clock() - startTime) / CLOCKS_PER_SEC;
@@ -158,10 +155,10 @@ int main(void) {
 			// printf("Uptime: %.1fs. Speed: %.2fm/s.\n", timeElapsed, speed);
 		}
 	}
-	// cudaEventDestroy(readStart);
-	// cudaEventDestroy(readStop);
-	// cudaEventDestroy(processStart);
-	// cudaEventDestroy(processStop);
+	cudaEventDestroy(readStart);
+	cudaEventDestroy(readStop);
+	cudaEventDestroy(processStart);
+	cudaEventDestroy(processStop);
 	cudaFree(seeds);
 	ifs.close();
 	return 0;
