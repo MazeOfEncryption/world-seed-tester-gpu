@@ -68,6 +68,7 @@ struct Tree {
 
 __constant__ Chunk chunks[] = {{3, 4}};
 
+// Ranges can easily be done using Tree{x, y, h} <= tree && tree <= Tree{x, y, h}
 __device__ bool checkTree(int chunkIndex, Tree tree) {
 	switch(chunkIndex) {
 		case 0:
@@ -83,7 +84,6 @@ __device__ bool checkTree(int chunkIndex, Tree tree) {
 	return false;
 }
 
-// TODO: Allow trees to have a range of possible coordinates.
 __global__ void process(long* seeds, long offset) {
 	long index = offset + blockIdx.x * blockDim.x + threadIdx.x;
 	long seed = seeds[index];
@@ -123,8 +123,6 @@ int main(void) {
 	// TODO: Fix issue where the last iteration will recheck seeds from the previous
 	// iteration if the number of inputs is not evenly divisible by WORK_UNIT_SIZE
 	// Currently "fixed" by setting all remaining seeds to 0.
-	// clock_t startTime = clock();
-	// clock_t lastIteration = clock();
 	cudaEvent_t readStart, readStop, processStart, processStop, memcpyStart, memcpyStop;
 	cudaEventCreate(&readStart);
 	cudaEventCreate(&readStop);
@@ -164,12 +162,6 @@ int main(void) {
 			cudaEventSynchronize(processStop);
 			cudaEventElapsedTime(&time, processStart, processStop);
 			printf("Process: %f\n", time);
-
-			// double iterationTime = (double)(clock() - lastIteration) / CLOCKS_PER_SEC;
-			// double timeElapsed = (double)(clock() - startTime) / CLOCKS_PER_SEC;
-			// lastIteration = clock();
-			// double speed = (double)WORK_UNIT_SIZE / (double)iterationTime / 1000000.0;
-			// printf("Uptime: %.1fs. Speed: %.2fm/s.\n", timeElapsed, speed);
 		}
 	}
 	cudaEventDestroy(readStart);
