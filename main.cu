@@ -51,17 +51,27 @@ struct Tree {
 	__host__ __device__ bool operator==(const Tree &rhs) {
 		return this->x == rhs.x && this->y == rhs.y && this->h == rhs.h;
 	}
+	__host__ __device__ bool operator>=(const Tree &rhs) {
+		return this->x >= rhs.x && this->y >= rhs.y && this->h >= rhs.h;
+	}
+	__host__ __device__ bool operator<=(const Tree &rhs) {
+		return this->x <= rhs.x && this->y <= rhs.y && this->h <= rhs.h;
+	}
 };
 
 __constant__ Chunk chunks[] = {{3, 4}};
 
-__device__ bool checkTree(Chunk chunk, Tree tree) {
-	if (chunk == Chunk{3, 4}) {
-		if (tree == Tree{ 4,  0, 6}) return true;
-		else if (tree == Tree{13, 14, 4}) return true;
-		else if (tree == Tree{13,  3, 5}) return true;
-		else if (tree == Tree{12, 11, 6}) return true;
-		else if (tree == Tree{10,  2, 4}) return true;
+__device__ bool checkTree(int chunkIndex, Tree tree) {
+	switch(chunkIndex) {
+		case 0:
+			if (tree == Tree{ 4,  0, 6}) return true;
+			else if (tree == Tree{13, 14, 4}) return true;
+			else if (tree == Tree{13,  3, 5}) return true;
+			else if (tree == Tree{12, 11, 6}) return true;
+			else if (tree == Tree{10,  2, 4}) return true;
+		break;
+		default:
+		break;
 	}
 	return false;
 }
@@ -79,7 +89,7 @@ __global__ void process(long* seeds, long offset) {
 		int found = 0;
 		for (int attempt = 0; attempt < TREE_ATTEMPTS; attempt++) {
 			Tree tree = {nextIntBound(&rand, 16), nextIntBound(&rand, 16), nextIntBound(&rand, 3) + 4};
-			if (checkTree(chunks[c], tree)) {
+			if (checkTree(c, tree)) {
 				advance_16(rand);
 				found++;
 			};
@@ -105,7 +115,7 @@ int main(void) {
 	// Load Input Block
 	// TODO: Fix issue where the last iteration will recheck seeds from the previous
 	// iteration if the number of inputs is not evenly divisible by WORK_UNIT_SIZE
-	// Currenmtly "fixed" by setting all remaining seeds to 0.
+	// Currently "fixed" by setting all remaining seeds to 0.
 	// clock_t startTime = clock();
 	// clock_t lastIteration = clock();
 	cudaEvent_t readStart, readStop, processStart, processStop, memcpyStart, memcpyStop;
