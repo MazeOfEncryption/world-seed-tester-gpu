@@ -63,6 +63,31 @@ struct Tree {
 	}
 };
 
+struct Timer {
+	cudaEvent_t startEvent;
+	cudaEvent_t stopEvent;
+	Timer()	{
+		cudaEventCreate(&startEvent);
+		cudaEventCreate(&stopEvent);
+	}
+	~Timer() {
+		cudaEventDestroy(startEvent);
+		cudaEventDestroy(stopEvent);
+	}
+	void start() {
+		cudaEventRecord(startEvent, 0);
+	}
+	void stop() {
+		cudaEventRecord(stopEvent, 0);
+	}
+	float elapsed() {
+		float elapsed;
+		cudaEventSynchronize(stopEvent);
+		cudaEventElapsedTime(&elapsed, startEvent, stopEvent);
+		return elapsed;
+	}
+};
+
 __constant__ Chunk chunks[] = {{3, 4, 5}};
 
 // Ranges can easily be done using Tree{x, y, h} <= tree && tree <= Tree{x, y, h}
@@ -127,17 +152,10 @@ int main(void) {
 	// TODO: Fix issue where the last iteration will recheck seeds from the previous
 	// iteration if the number of inputs is not evenly divisible by WORK_UNIT_SIZE
 	// Currently "fixed" by setting all remaining seeds to 0.
-	cudaEvent_t readStart, readStop, processStart, processStop, memcpyStart, memcpyStop;
-	cudaEventCreate(&readStart);
-	cudaEventCreate(&readStop);
-	cudaEventCreate(&processStart);
-	cudaEventCreate(&processStop);
-	cudaEventCreate(&memcpyStart);
-	cudaEventCreate(&memcpyStop);
+	Timer readEvent, memcpyEvent, processEvent;
 	std::string line;
-	float time;
 	while(std::getline(ifs, line)) {
-		cudaEventRecord(readStart, 0);
+		readEvent.start();
 		for (long i = 0; i < INPUT_BLOCK_SIZE; i++) {
 			if (ifs >> line) {
 				long val = std::atoll(line.c_str());
@@ -146,21 +164,17 @@ int main(void) {
 				input[i] = 0;
 			}
 		}
-		cudaEventRecord(readStop, 0);
-		cudaEventSynchronize(readStop);
-		cudaEventElapsedTime(&time, readStart, readStop);
-		printf("Read: %f\n", time);
+		readEvent.stop();
+		printf("Read: %f\n", readEvent.elapsed());
 		// Copy to VRAM
-		cudaEventRecord(memcpyStart, 0);
+		memcpyEvent.start();
 		CHECK_GPU_ERR(cudaMemcpy(seeds, input, sizeof(long) * INPUT_BLOCK_SIZE, cudaMemcpyHostToDevice));
-		cudaEventRecord(memcpyStop, 0);
-		cudaEventSynchronize(memcpyStop);
-		cudaEventElapsedTime(&time, memcpyStart, memcpyStop);
-		printf("Memcpy: %f\n", time);
+		memcpyEvent.stop();
+		printf("Memcpy: %f\n", memcpyEvent.elapsed());
 		for(int offset = 0; offset < INPUT_BLOCK_SIZE; offset += WORK_UNIT_SIZE) {
 			*outputIndex = 0;
-			cudaEventRecord(processStart, 0);
 			// Process input
+			processEvent.start();
 			process<<<WORK_UNIT_SIZE / 256, 256>>>(seeds, offset, outputIndex, output);
 			CHECK_GPU_ERR(cudaDeviceSynchronize());
 			// Save output
@@ -169,16 +183,10 @@ int main(void) {
 				ofs << output[i] << std::endl;
 				output[i] = 0;
 			}
-			cudaEventRecord(processStop, 0);
-			cudaEventSynchronize(processStop);
-			cudaEventElapsedTime(&time, processStart, processStop);
-			printf("Process: %f\n", time);
+			processEvent.stop();
+			printf("Process: %f\n", processEvent.elapsed());
 		}
 	}
-	cudaEventDestroy(readStart);
-	cudaEventDestroy(readStop);
-	cudaEventDestroy(processStart);
-	cudaEventDestroy(processStop);
 	cudaFree(seeds);
 	cudaFreeHost(input);
 	ifs.close();
