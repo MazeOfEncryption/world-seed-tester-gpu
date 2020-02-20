@@ -163,6 +163,7 @@ int main(void) {
 			process<<<WORK_UNIT_SIZE / 256, 256>>>(seeds, offset, outputIndex, output);
 			CHECK_GPU_ERR(cudaDeviceSynchronize());
 			// Save output
+			// TODO: Fix bug where 0 is sometimes written to the file instead of(?) the actual seed
 			for(int i = 0, e = *outputIndex; i < e; i++) {
 				ofs << output[e] << std::endl;
 				output[e] = 0;
