@@ -107,7 +107,12 @@ __global__ void process(long* seeds, long offset, int *outputIndex, long *output
 //TODO: Fix timing. Using a cudaEvent_t multiple times in a loop doesn't work properly(?). Also figure out proper synchronization calls.
 int main(void) {
 	// Allocate RAM for input
-	long *input = (long *)malloc(sizeof(long) * INPUT_BLOCK_SIZE);
+	long *input;
+	cudaError_t stat = cudaMallocHost((void **)&input, sizeof(long) * INPUT_BLOCK_SIZE);
+	if (stat != cudaSuccess) {
+		std::cout << "Failed to initialize pinned memory" << std::endl;
+		return -1;
+	}
 	// Open File
 	std::ifstream ifs ("input.txt");
 	if (ifs.fail()) {
@@ -179,6 +184,7 @@ int main(void) {
 	cudaEventDestroy(processStart);
 	cudaEventDestroy(processStop);
 	cudaFree(seeds);
+	cudaFreeHost(input);
 	ifs.close();
 	ofs.close();
 	return 0;
