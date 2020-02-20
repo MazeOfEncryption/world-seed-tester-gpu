@@ -12,6 +12,13 @@
 #define WORK_UNIT_SIZE (2 << 20)
 #define CHECK_GPU_ERR(code) gpuAssert((code), __FILE__, __LINE__)
 
+#ifndef CHUNK_X
+#define CHUNK_X 0
+#endif
+#ifndef CHUNK_Y
+#define CHUNK_Y 0
+#endif
+
 #define TREE_ATTEMPTS 12
 
 #define RANDOM_MASK (1ULL << 48) - 1
@@ -83,7 +90,7 @@ __global__ void process(long* seeds, long offset) {
 	long rand;
 	for(int c = 0; c < sizeof(chunks) / sizeof(Chunk); c++) {
 		setSeed(rand, seed);
-		long chunkSeed = chunks[c].x * (nextLong(&rand) / 2LL * 2LL + 1LL) + chunks[c].y * (nextLong(&rand) / 2LL * 2LL + 1LL) ^ seed;
+		long chunkSeed = (chunks[c].x + CHUNK_X) * (nextLong(&rand) / 2LL * 2LL + 1LL) + (chunks[c].y + CHUNK_Y) * (nextLong(&rand) / 2LL * 2LL + 1LL) ^ seed;
 		setSeed(rand, chunkSeed);
 		advance_3760(rand);
 		int found = 0;
