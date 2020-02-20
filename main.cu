@@ -99,8 +99,8 @@ __global__ void process(long* seeds, long offset, int *outputIndex, long *output
 			};
 		}
 		if (found == chunks[c].treeCount) {
-			int index = atomicAdd(outputIndex, 1);
 			output[*outputIndex] = seed;
+			int index = atomicAdd(outputIndex, 1);
 		}
 	}
 }
@@ -170,8 +170,8 @@ int main(void) {
 			// Save output
 			// TODO: Fix bug where 0 is sometimes written to the file instead of(?) the actual seed
 			for(int i = 0, e = *outputIndex; i < e; i++) {
-				ofs << output[e] << std::endl;
-				output[e] = 0;
+				ofs << output[i] << std::endl;
+				output[i] = 0;
 			}
 			cudaEventRecord(processStop, 0);
 			cudaEventSynchronize(processStop);
