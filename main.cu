@@ -47,10 +47,7 @@ inline void gpuAssert(cudaError_t code, const char* file, int line) {
 }
 
 struct Chunk {
-	int x, y;
-	__host__ __device__ bool operator==(const Chunk &rhs) {
-		return this->x == rhs.x && this->y == rhs.y;
-	}
+	int x, y, treeCount;
 };
 
 struct Tree {
@@ -66,7 +63,7 @@ struct Tree {
 	}
 };
 
-__constant__ Chunk chunks[] = {{3, 4}};
+__constant__ Chunk chunks[] = {{3, 4, 5}};
 
 // Ranges can easily be done using Tree{x, y, h} <= tree && tree <= Tree{x, y, h}
 __device__ bool checkTree(int chunkIndex, Tree tree) {
@@ -84,7 +81,7 @@ __device__ bool checkTree(int chunkIndex, Tree tree) {
 	return false;
 }
 
-__global__ void process(long* seeds, long offset) {
+__global__ void process(long* seeds, long offset, int *outputIndex, long *output) {
 	long index = offset + blockIdx.x * blockDim.x + threadIdx.x;
 	long seed = seeds[index];
 	long rand;
@@ -101,8 +98,9 @@ __global__ void process(long* seeds, long offset) {
 				found++;
 			};
 		}
-		if (found == 5) {
-			printf("Seed: %lld.\n", seed);
+		if (found == chunks[c].treeCount) {
+			int index = atomicAdd(outputIndex, 1);
+			output[*outputIndex] = seed;
 		}
 	}
 }
@@ -116,9 +114,14 @@ int main(void) {
 		std::cout << "ERROR::IFSTREAM::FAIL" << std::endl;
 		return -1;
 	}
+	std::ofstream ofs ("output.txt");
+	
 	// Allocate VRAM for input
-	long *seeds;
+	long *seeds, *output;
+	int *outputIndex = 0;
 	CHECK_GPU_ERR(cudaMallocManaged((long **)&seeds, sizeof(long) * INPUT_BLOCK_SIZE));
+	CHECK_GPU_ERR(cudaMallocManaged((int **)&outputIndex, sizeof(outputIndex)));
+	CHECK_GPU_ERR(cudaMallocManaged((long **)&output, (1LL << 10)));
 	// Load Input Block
 	// TODO: Fix issue where the last iteration will recheck seeds from the previous
 	// iteration if the number of inputs is not evenly divisible by WORK_UNIT_SIZE
@@ -154,10 +157,16 @@ int main(void) {
 		cudaEventElapsedTime(&time, memcpyStart, memcpyStop);
 		printf("Memcpy: %f\n", time);
 		for(int offset = 0; offset < INPUT_BLOCK_SIZE; offset += WORK_UNIT_SIZE) {
+			*outputIndex = 0;
 			cudaEventRecord(processStart, 0);
 			// Process input
-			process<<<WORK_UNIT_SIZE / 256, 256>>>(seeds, offset);
-			cudaDeviceSynchronize();
+			process<<<WORK_UNIT_SIZE / 256, 256>>>(seeds, offset, outputIndex, output);
+			CHECK_GPU_ERR(cudaDeviceSynchronize());
+			// Save output
+			for(int i = 0, e = *outputIndex; i < e; i++) {
+				ofs << output[e] << std::endl;
+				output[e] = 0;
+			}
 			cudaEventRecord(processStop, 0);
 			cudaEventSynchronize(processStop);
 			cudaEventElapsedTime(&time, processStart, processStop);
@@ -170,5 +179,6 @@ int main(void) {
 	cudaEventDestroy(processStop);
 	cudaFree(seeds);
 	ifs.close();
+	ofs.close();
 	return 0;
 }
