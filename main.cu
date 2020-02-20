@@ -108,11 +108,7 @@ __global__ void process(long* seeds, long offset, int *outputIndex, long *output
 int main(void) {
 	// Allocate RAM for input
 	long *input;
-	cudaError_t stat = cudaMallocHost((void **)&input, sizeof(long) * INPUT_BLOCK_SIZE);
-	if (stat != cudaSuccess) {
-		std::cout << "Failed to initialize pinned memory" << std::endl;
-		return -1;
-	}
+	CHECK_GPU_ERR(cudaMallocHost((void **)&input, sizeof(long) * INPUT_BLOCK_SIZE));
 	// Open File
 	std::ifstream ifs ("input.txt");
 	if (ifs.fail()) {
